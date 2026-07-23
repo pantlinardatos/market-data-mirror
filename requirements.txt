@@ -1,0 +1,7 @@
+# Deliberately not pinned to exact versions: yfinance is an unofficial Yahoo
+# scraper that breaks for a few days at a time and is fixed upstream quickly.
+# Floating minors means a fix arrives on its own; the Telegram alert covers the
+# window where it is broken. Pin here only if a bad release actually bites.
+pandas>=2.2
+yfinance>=0.2.55
+ccxt>=4.4

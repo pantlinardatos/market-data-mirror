@@ -1,0 +1,83 @@
+name: fetch
+
+on:
+  schedule:
+    # 08:17 UTC — off-peak minute (GitHub drops/jitters cron on the hour).
+    # After the US close, before the Greek morning.
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated subset (empty = all)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      # continue-on-error so that partial data still gets committed below.
+      # One broken vendor must not cost us the symbols that did work.
+      - name: Fetch
+        id: fetch
+        continue-on-error: true
+        run: python fetch.py --symbols "${{ inputs.symbols }}"
+
+      # Commit BEFORE alerting/failing, so good data always lands.
+      - name: Commit changed CSVs
+        id: commit
+        run: |
+          git config user.name  "market-data-mirror[bot]"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A data status.json
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "no data change — nothing to commit"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git commit -m "data: $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
+
+      - name: Alert on failure
+        if: steps.fetch.outcome == 'failure'
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          FAILED=$(python -c "import json;print(', '.join(json.load(open('status.json'))['failed']) or 'unknown')")
+          RUN="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          TEXT="🔴 market-data-mirror: fetch failed for $FAILED"$'\n'"$RUN"
+          if [ -n "$TOKEN" ] && [ -n "$CHAT" ]; then
+            curl -sS -X POST "https://api.telegram.org/bot$TOKEN/sendMessage" \
+              --data-urlencode "chat_id=$CHAT" \
+              --data-urlencode "text=$TEXT" \
+              --data-urlencode "disable_web_page_preview=true" >/dev/null
+          else
+            echo "::warning::TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — no alert sent"
+          fi
+
+      - name: Fail the run if any symbol failed
+        if: steps.fetch.outcome == 'failure'
+        run: |
+          cat status.json
+          exit 1
