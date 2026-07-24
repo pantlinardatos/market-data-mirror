@@ -1,8 +1,14 @@
 {
-  "run_utc": "2026-07-23T22:09:29Z",
+  "run_utc": "2026-07-24T09:04:37Z",
   "ok": [
     "BTC",
+    "DXY",
+    "HYPE",
+    "PLTR",
+    "QQQ",
     "SOL",
+    "SPX",
+    "SPY",
     "TSLA"
   ],
   "failed": {}
