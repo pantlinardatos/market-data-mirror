@@ -1,7 +1,15 @@
 {
-  "run_utc": "2026-07-24T10:04:14Z",
-  "ok": [],
-  "failed": {
-    "FAKETEST": "unknown symbol (not in STOCKS or CRYPTO)"
-  }
+  "run_utc": "2026-07-25T10:00:25Z",
+  "ok": [
+    "BTC",
+    "DXY",
+    "HYPE",
+    "PLTR",
+    "QQQ",
+    "SOL",
+    "SPX",
+    "SPY",
+    "TSLA"
+  ],
+  "failed": {}
 }
