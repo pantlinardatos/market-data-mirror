@@ -67,10 +67,18 @@ as written. Add a symbol by editing the `STOCKS` / `CRYPTO` dicts at the top of
 Longest-wins matters more than it sounds: hardcoding Binance would start BTC at
 2017-08 instead of Coinbase's 2015-07 and quietly drop 759 sessions, including
 the 2015 bottom. It is deterministic, so the winning venue does not flip between
-runs. Current winners: BTC → Coinbase Exchange (4021 daily bars from 2015-07-20),
-SOL → Binance (2172 from 2020-08-11), HYPE → Kraken (Binance has no HYPE/USDT).
+runs. Current winners (2026-08-05): BTC → Coinbase Exchange (4034 bars from
+2015-07-20), ETH → Coinbase Exchange (3503 from 2017-01-01), SOL → Coinbase
+Exchange (1875 from 2021-06-17), HYPE / ONDO / MON → Kraken, XPL → KuCoin.
 The 4H frame may come from a different venue than the daily, because the venue
 with the deepest history does not always offer a 4-hour granularity.
+
+**Binance never wins here.** GitHub's runners sit in a region Binance blocks, so
+every `binance:` candidate returns `451 Service unavailable from a restricted
+location` and is skipped. The candidates stay in the list because they cost one
+failed request and would start winning again the day that changes — but do not
+expect Binance depth from this mirror. Bybit answers `403` from CloudFront for
+the same reason.
 
 4H for stocks is best-effort: Yahoo caps intraday history at 60 days and has no
 native 4-hour interval, so it is resampled from 1H. Crypto 4H comes straight

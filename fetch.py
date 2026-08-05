@@ -76,9 +76,9 @@ CRYPTO = {
     # candidate list is widened to the venues that list new tokens first.
     # Per-symbol isolation means a token nobody lists just fails on its own.
     "MON":  ["binance:MON/USDT", "bybit:MON/USDT", "kucoin:MON/USDT",
-             "gateio:MON/USDT", "kraken:MON/USD", "coinbaseexchange:MON/USD"],
+             "gate:MON/USDT", "kraken:MON/USD", "coinbaseexchange:MON/USD"],
     "XPL":  ["binance:XPL/USDT", "bybit:XPL/USDT", "kucoin:XPL/USDT",
-             "gateio:XPL/USDT", "kraken:XPL/USD", "coinbaseexchange:XPL/USD"],
+             "gate:XPL/USDT", "kraken:XPL/USD", "coinbaseexchange:XPL/USD"],
 }
 
 # Kraken's OHLC endpoint is capped at 720 candles whatever you ask for. That is
