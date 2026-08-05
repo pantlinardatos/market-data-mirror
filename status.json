@@ -1,15 +1,27 @@
 {
-  "run_utc": "2026-08-05T10:46:47Z",
+  "run_utc": "2026-08-05T23:19:52Z",
   "ok": [
+    "AMD",
+    "BRENT",
     "BTC",
+    "COPPER",
     "DXY",
+    "ETH",
+    "GOLD",
     "HYPE",
+    "MON",
+    "MSTR",
+    "NDX",
+    "ONDO",
     "PLTR",
     "QQQ",
+    "SILVER",
+    "SOFI",
     "SOL",
     "SPX",
     "SPY",
-    "TSLA"
+    "TSLA",
+    "XPL"
   ],
   "failed": {}
 }
