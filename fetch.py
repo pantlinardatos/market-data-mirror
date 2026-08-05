@@ -38,8 +38,23 @@ STOCKS = {
     "PLTR": "PLTR",
     "SPY":  "SPY",
     "QQQ":  "QQQ",
+    "SOFI": "SOFI",
+    "AMD":  "AMD",
+    "MSTR": "MSTR",
     "DXY":  "DX-Y.NYB",   # ICE dollar index on Yahoo
     "SPX":  "^GSPC",      # Yahoo's S&P 500 cash index (the plan writes ^SPX)
+    "NDX":  "^NDX",       # Nasdaq-100 cash index
+
+    # Commodities via Yahoo's continuous front-month futures, NOT spot ETFs.
+    # The futures series is the deeper and more stable feed: GC=F goes back to
+    # 2000 with an unbroken daily tape, while the ETF proxies (GLD 2004, SLV
+    # 2006, CPER 2011, BNO 2010) start later, carry expense-ratio drift, and
+    # track the metal rather than quote it. Yahoo rolls the front month itself,
+    # so the stem stays constant and the CSV keeps appending across expiries.
+    "GOLD":   "GC=F",     # COMEX gold front-month
+    "SILVER": "SI=F",     # COMEX silver front-month
+    "COPPER": "HG=F",     # COMEX copper front-month
+    "BRENT":  "BZ=F",     # ICE Brent crude front-month
 }
 
 # ccxt candidates per symbol. Every venue that answers is tried and the one
@@ -53,6 +68,17 @@ CRYPTO = {
              "binance:SOL/USDT", "kraken:SOL/USD"],
     "HYPE": ["binance:HYPE/USDT", "coinbaseexchange:HYPE/USD",
              "coinbase:HYPE/USD", "kraken:HYPE/USD"],
+    "ETH":  ["coinbaseexchange:ETH/USD", "coinbase:ETH/USD",
+             "binance:ETH/USDT", "kraken:ETH/USD"],
+    "ONDO": ["coinbaseexchange:ONDO/USD", "coinbase:ONDO/USD",
+             "binance:ONDO/USDT", "kraken:ONDO/USD"],
+    # MON/XPL are recent listings — the majors may not carry them yet, so the
+    # candidate list is widened to the venues that list new tokens first.
+    # Per-symbol isolation means a token nobody lists just fails on its own.
+    "MON":  ["binance:MON/USDT", "bybit:MON/USDT", "kucoin:MON/USDT",
+             "gateio:MON/USDT", "kraken:MON/USD", "coinbaseexchange:MON/USD"],
+    "XPL":  ["binance:XPL/USDT", "bybit:XPL/USDT", "kucoin:XPL/USDT",
+             "gateio:XPL/USDT", "kraken:XPL/USD", "coinbaseexchange:XPL/USD"],
 }
 
 # Kraken's OHLC endpoint is capped at 720 candles whatever you ask for. That is

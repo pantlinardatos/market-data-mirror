@@ -49,10 +49,20 @@ two back-to-back runs were verified byte-identical across all 20 files.
 
 | | |
 |---|---|
-| Stocks / indices (yfinance) | TSLA, PLTR, SPY, QQQ, DXY (`DX-Y.NYB`), SPX (`^GSPC`) |
-| Crypto (ccxt) | BTC, SOL, HYPE — every candidate venue is tried and the one with the **longest** daily history wins |
+| Stocks (yfinance) | TSLA, PLTR, SPY, QQQ, SOFI, AMD, MSTR |
+| Indices (yfinance) | DXY (`DX-Y.NYB`), SPX (`^GSPC`), NDX (`^NDX`) |
+| Commodities (yfinance futures) | GOLD (`GC=F`), SILVER (`SI=F`), COPPER (`HG=F`), BRENT (`BZ=F`) |
+| Crypto (ccxt) | BTC, ETH, SOL, HYPE, ONDO, MON, XPL — every candidate venue is tried and the one with the **longest** daily history wins |
 
-Add one by editing the `STOCKS` / `CRYPTO` dicts at the top of `fetch.py`.
+Commodities are quoted from Yahoo's continuous **front-month futures**, not spot
+ETFs: the futures tape is deeper and cleaner (`GC=F` runs from 2000, against
+GLD's 2004 / SLV's 2006 / CPER's 2011 / BNO's 2010), it has no expense-ratio
+drift, and Yahoo rolls the contract itself so the filename stem never changes.
+
+The stem *is* the contract — `chart-analysis.py` asks for `GOLD_1d.csv`,
+`NDX_1d.csv` and so on by name, so the left-hand column above must stay exactly
+as written. Add a symbol by editing the `STOCKS` / `CRYPTO` dicts at the top of
+`fetch.py`; nothing else in the pipeline needs to know.
 
 Longest-wins matters more than it sounds: hardcoding Binance would start BTC at
 2017-08 instead of Coinbase's 2015-07 and quietly drop 759 sessions, including
