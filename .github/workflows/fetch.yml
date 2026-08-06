@@ -37,10 +37,16 @@ jobs:
 
       # continue-on-error so that partial data still gets committed below.
       # One broken vendor must not cost us the symbols that did work.
+      #
+      # The dispatch input is passed through env, never interpolated into the
+      # run script: `--symbols "${{ inputs.symbols }}"` would let anyone who can
+      # trigger the workflow inject shell into a job that holds contents: write.
       - name: Fetch
         id: fetch
         continue-on-error: true
-        run: python fetch.py --symbols "${{ inputs.symbols }}"
+        env:
+          SYMBOLS: ${{ inputs.symbols }}
+        run: python fetch.py --symbols "$SYMBOLS"
 
       # Commit BEFORE alerting/failing, so good data always lands.
       - name: Commit changed CSVs
