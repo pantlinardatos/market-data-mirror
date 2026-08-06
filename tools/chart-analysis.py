@@ -378,20 +378,39 @@ def load_manual_levels(path: str, sym: str):
     return levels, skipped
 
 
-def manual_confluence(level_price: float, jtf: dict, k: float = 0.5):
-    """Confluence χειροκίνητου level με αλγοριθμικά: |Δ| ≤ k×ATR14 του TF.
-    Επιστρέφει λίστα 'TF side price' strings (deterministic σειρά)."""
+def manual_confluence(level_price: float, jtf: dict, kind: str = None,
+                      daily_atr: float = None, k: float = 0.5):
+    """Confluence χειροκίνητου level με αλγοριθμικά levels.
+
+    Ανοχή = k×ATR14 του DAILY για ΟΛΑ τα TF (review R2 §1): το ATR του κάθε
+    TF ήταν πολύ πλατύ — το monthly ATR σε ακριβή μετοχή (π.χ. TSLA M ATR≈70
+    στα 321$ = ±35 = ±11%) «πιάνει» και levels της αντίθετης πλευράς. Το
+    daily ATR είναι η σταθερή, στενή μονάδα απόστασης.
+    - δείχνει την απόσταση σε ATR στο string (Δn×ATR)
+    - σημειώνει όταν το side του algo level ΔΕΝ ταιριάζει με το manual kind
+      (manual support ↔ algo resistance ή αντίστροφα) — ⚠️αντίθετη πλευρά
+    Επιστρέφει λίστα strings σε deterministic σειρά."""
+    if daily_atr is None:
+        dd = jtf.get("D")
+        daily_atr = dd.get("atr14") if dd else None
+    if not daily_atr or daily_atr <= 0:
+        return []
+    tol = k * daily_atr
+    kind = (kind or "").strip().lower()
     hits = []
     for tf in ("M", "W", "D", "4H"):
         d = jtf.get(tf)
-        if not d or not d.get("atr14"):
+        if not d:
             continue
-        tol = k * d["atr14"]
         for side, key in (("res", "resistance"), ("sup", "support")):
             for lv in d.get(key, []):
                 p = lv.get("price")
                 if p is not None and abs(p - level_price) <= tol:
-                    hits.append(f"{tf} {side} {fmt(p)}")
+                    dist = abs(p - level_price) / daily_atr
+                    mism = " ⚠️αντίθετη πλευρά" if kind and (
+                        (side == "res" and kind == "support") or
+                        (side == "sup" and kind == "resistance")) else ""
+                    hits.append(f"{tf} {side} {fmt(p)} (Δ{dist:.2f}×ATR){mism}")
     return hits
 
 
@@ -546,7 +565,7 @@ def cmd_analyze(sym: str, csv_dir: str, out_dir: str, as_of: str = None,
     if manual or manual_skipped:
         lines += ["## Levels Π. (χειροκίνητα — config/levels.csv)", ""]
         for m in manual:
-            hits = manual_confluence(m["price"], jtf)
+            hits = manual_confluence(m["price"], jtf, kind=m["kind"])
             src = f" · πηγή: {m['source']}" if m["source"] else ""
             dt = f" ({m['date']})" if m["date"] else ""
             note = f" — {m['note']}" if m["note"] else ""
