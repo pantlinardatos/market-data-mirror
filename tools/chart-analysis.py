@@ -344,28 +344,37 @@ def load_manual_levels(path: str, sym: str):
     Σχήμα: symbol,price,kind,source,date,note — kind: support|resistance.
     Επιστρέφει (levels, skipped): λίστα dicts για το σύμβολο + πλήθος
     γραμμών που δεν πέρασαν τα deterministic checks (ποτέ guess)."""
-    levels, skipped = [], 0
+    levels, skipped, seen = [], 0, set()
     if not path or not os.path.exists(path):
         return levels, skipped
     import csv as _csv
+    import re as _re
+
+    def _txt(v):
+        # review 6/8: τα free-text πεδία μπαίνουν σε report/markdown —
+        # όχι newlines/markdown δομή από το CSV, cap μήκους
+        return _re.sub(r"\s+", " ", (v or "").strip())[:120]
+
     with open(path, newline="", encoding="utf-8") as f:
         for row in _csv.DictReader(f):
             if (row.get("symbol") or "").strip().upper() != sym:
                 continue
             kind = (row.get("kind") or "").strip().lower()
-            try:
-                price = float(row.get("price"))
-            except (TypeError, ValueError):
-                price = None
-            if price is None or price <= 0 or kind not in ("support",
-                                                           "resistance"):
+            raw = (row.get("price") or "").strip()
+            # αυστηρό format (όχι float('nan'/'inf'/underscores) — review 6/8)
+            price = float(raw) if _re.fullmatch(r"\d+(\.\d+)?", raw) else None
+            if (price is None or not math.isfinite(price) or price <= 0
+                    or kind not in ("support", "resistance")):
                 skipped += 1
                 continue
+            if (price, kind) in seen:   # διπλή γραμμή = ένα level, όχι διπλά 📐
+                continue
+            seen.add((price, kind))
             levels.append({"price": price, "kind": kind,
-                           "source": (row.get("source") or "").strip(),
-                           "date": (row.get("date") or "").strip(),
-                           "note": (row.get("note") or "").strip()})
-    levels.sort(key=lambda m: m["price"], reverse=True)
+                           "source": _txt(row.get("source")),
+                           "date": _txt(row.get("date")),
+                           "note": _txt(row.get("note"))})
+    levels.sort(key=lambda m: (-m["price"], m["kind"]))
     return levels, skipped
 
 
@@ -543,7 +552,7 @@ def cmd_analyze(sym: str, csv_dir: str, out_dir: str, as_of: str = None,
             note = f" — {m['note']}" if m["note"] else ""
             conf = (" · ✔ confluence: " + ", ".join(hits)) if hits else ""
             lines += [f"- **{fmt(m['price'])}** {m['kind']}{src}{dt}{note}{conf}"]
-            jml.append({**m, "confluence": hits})
+            jml.append({**m, "price": _finite(m["price"]), "confluence": hits})
         if manual_skipped:
             lines += [f"_⚪ {manual_skipped} γραμμές του levels.csv δεν πέρασαν "
                       "τα checks (symbol/price/kind) — αγνοήθηκαν, δες αρχείο._"]
