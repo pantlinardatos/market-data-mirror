@@ -111,21 +111,13 @@ still works and just logs a warning instead of alerting.
 
 Positions, theses, journals, the Twitter JSONL archive. Public market data only.
 
-## tools/chart-analysis.py (read-only αντίγραφο)
+## tools/chart-analysis.py
 
-Το analysis script του trading-cockpit, δημοσιευμένο εδώ ώστε ένα fresh
-session ΧΩΡΙΣ πρόσβαση στο private repo να μπορεί να τρέξει την ανάλυση
-(«PAT-free analyze»): δεδομένα από `data/`, script από εδώ.
-
-- **Canonical: το private trading-cockpit** (`services/chart-scan/`) — εκεί
-  γίνονται reviews/tests/pins. Αυτό εδώ είναι one-way αντίγραφο.
-- **Sync rule:** κάθε commit του cockpit που αλλάζει το chart-analysis.py
-  οφείλει στο ίδιο batch να αντιγράψει το αρχείο κι εδώ. Το heartbeat του
-  cockpit συγκρίνει καθημερινά τα sha256 και ειδοποιεί σε drift — αν το
-  δεις να αποκλίνει, ισχύει το cockpit.
-- Καμία προσωπική πληροφορία: μόνο ο αλγόριθμος (EMA/S/R/verdicts/pairs).
-  Τα χειροκίνητα levels (`--levels`) μένουν στο private repo — χωρίς το
-  αρχείο, το section παραλείπεται σιωπηλά.
+Το script που παράγει την τεχνική ανάλυση (EMA / support-resistance / verdicts)
+πάνω στα CSV αυτού του repo. Read-only αντίγραφο — το canonical ζει αλλού και οι
+αλλαγές γίνονται εκεί, οπότε μη στέλνεις PR σε αυτό το αρχείο. Τρέξε το με τα
+`data/` του repo. Αν το χρησιμοποιείς και θες εγγύηση ότι είναι ενημερωμένο ή
+αναλλοίωτο: ρώτα τον ιδιοκτήτη του repo — δεν υπάρχει άλλος μηχανισμός εδώ.
 
 ```
 pip install pandas numpy
