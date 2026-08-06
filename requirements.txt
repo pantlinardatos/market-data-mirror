@@ -1,7 +1,27 @@
-# Deliberately not pinned to exact versions: yfinance is an unofficial Yahoo
-# scraper that breaks for a few days at a time and is fixed upstream quickly.
-# Floating minors means a fix arrives on its own; the Telegram alert covers the
-# window where it is broken. Pin here only if a bad release actually bites.
-pandas>=2.2
-yfinance>=0.2.55
-ccxt>=4.4
+# Pinned to exact versions, deliberately.
+#
+# Trade-off, written down so the next person does not "fix" it back:
+#   Before: floating minors (pandas>=2.2, yfinance>=0.2.55, ccxt>=4.4). yfinance
+#   is an unofficial Yahoo scraper that breaks for a few days at a time and is
+#   fixed upstream quickly, so floating meant the fix arrived on its own and the
+#   Telegram alert only had to cover the gap.
+#   Now: the runner holds `contents: write` on this repo and the CSVs it commits
+#   are read by privileged sessions. A floating dependency is therefore an
+#   unreviewed code path into that pipeline — one bad or hostile release lands
+#   straight in a job that can push. Pinning removes the self-heal: a genuine
+#   vendor break now needs a manual bump here instead of curing itself overnight.
+#   That is the price, and it is the right way round for a repo that feeds
+#   privileged sessions.
+#
+# Versions below are the ones the old floating spec actually resolved to
+# (verified against PyPI with `pip install --dry-run --report`, 2026-08-06),
+# so this pin is a freeze of the last known-good set, not a jump.
+#
+# Bumping: change the number here, then let the nightly run verify it — a bad
+# pin shows up as a fetch failure plus the usual Telegram alert.
+pandas==3.0.5
+numpy==2.4.6      # pandas' own dep, pinned too: it is the ABI-sensitive one
+yfinance==1.5.2
+ccxt==4.5.71
+# Transitive deps (requests, curl_cffi, aiohttp, …) are still resolved freely;
+# pinning the full closure would need a lockfile and is not worth it here.
