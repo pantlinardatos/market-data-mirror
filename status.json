@@ -1,5 +1,5 @@
 {
-  "run_utc": "2026-08-05T23:19:52Z",
+  "run_utc": "2026-08-06T10:50:55Z",
   "ok": [
     "AMD",
     "BRENT",
@@ -23,5 +23,6 @@
     "TSLA",
     "XPL"
   ],
-  "failed": {}
+  "failed": {},
+  "alerted_failed": []
 }
