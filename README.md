@@ -104,3 +104,24 @@ still works and just logs a warning instead of alerting.
 ## What does not belong here
 
 Positions, theses, journals, the Twitter JSONL archive. Public market data only.
+
+## tools/chart-analysis.py (read-only αντίγραφο)
+
+Το analysis script του trading-cockpit, δημοσιευμένο εδώ ώστε ένα fresh
+session ΧΩΡΙΣ πρόσβαση στο private repo να μπορεί να τρέξει την ανάλυση
+(«PAT-free analyze»): δεδομένα από `data/`, script από εδώ.
+
+- **Canonical: το private trading-cockpit** (`services/chart-scan/`) — εκεί
+  γίνονται reviews/tests/pins. Αυτό εδώ είναι one-way αντίγραφο.
+- **Sync rule:** κάθε commit του cockpit που αλλάζει το chart-analysis.py
+  οφείλει στο ίδιο batch να αντιγράψει το αρχείο κι εδώ. Το heartbeat του
+  cockpit συγκρίνει καθημερινά τα sha256 και ειδοποιεί σε drift — αν το
+  δεις να αποκλίνει, ισχύει το cockpit.
+- Καμία προσωπική πληροφορία: μόνο ο αλγόριθμος (EMA/S/R/verdicts/pairs).
+  Τα χειροκίνητα levels (`--levels`) μένουν στο private repo — χωρίς το
+  αρχείο, το section παραλείπεται σιωπηλά.
+
+```
+pip install pandas numpy
+python3 tools/chart-analysis.py analyze SOL --csv-dir data --out /tmp/out --no-charts
+```
