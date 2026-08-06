@@ -72,18 +72,33 @@ ASSET_CLASS = {
 PAIR_BENCH = {"crypto": ["BTC"], "stock": ["SPX", "NDX"], "commodity": ["GOLD"]}
 
 # per-timeframe: pivot window k, candles shown, S/R lookback, log scale
+# NOTE: `show` = candles rendered in the PNG — PRESENTATION-ONLY (redesign
+# 2026-08-06). Η S/R λογική (sr_levels) διαβάζει `look`, ΟΧΙ `show` — αμετάβλητη.
 TF_CFG = {
-    "4H": dict(k=6, show=360, look=0,   log=False),
-    "D":  dict(k=5, show=365, look=600, log=False),
-    "W":  dict(k=4, show=208, look=260, log=True),
+    "4H": dict(k=6, show=180, look=0,   log=False),
+    "D":  dict(k=5, show=180, look=600, log=False),
+    "W":  dict(k=4, show=156, look=260, log=True),
     "M":  dict(k=3, show=999, look=120, log=True),
 }
 
-# colors (TradingView-familiar; dataviz-checked: distinct hues, text stays ink)
+# colors (redesign 2026-08-06 — validated palette, mobile-first PNG)
+# EMA: 21 amber / 50 green / 200 purple (TradingView-familiar για τον Π.)
 C_UP, C_DN = "#26a69a", "#ef5350"
-C_EMA = {21: "#2962ff", 50: "#f57c00", 200: "#7b1fa2"}
-C_SUP, C_RES = "#00897b", "#d32f2f"
-C_GRID, C_INK, C_MUT = "#e6e8ea", "#1d2126", "#6b7280"
+C_EMA = {21: "#eda100", 50: "#008300", 200: "#7b1fa2"}
+EMA_LW = {21: 2.2, 50: 1.8, 200: 1.8}
+C_SUP, C_RES = "#00897b", "#d32f2f"          # algo levels (alpha 0.30 στο chart)
+C_MAN = "#1d2126"                             # manual levels Π. (ink, alpha 0.55)
+C_VOL = "#cfd6dc"                             # volume bars (ενιαίο)
+C_RATIO = "#2a78d6"                           # ratio line
+C_INK, C_SEC, C_MUT = "#1d2126", "#52514e", "#6b7280"
+C_GRID = "#e6e8ea"
+# verdict badge: (bg, fg) ανά κατεύθυνση
+BADGE = {"bull": ("#e6f4ea", "#1e7d32"),
+         "neutral": ("#eef0f2", "#52514e"),
+         "bear": ("#fdecea", "#b3261e")}
+FIGSIZE = (7.2, 9.0)                          # 1080×1350 @ dpi 150 (4:5 portrait)
+DPI = 150
+TF_NAME = {"4H": "4-Hour", "D": "Daily", "W": "Weekly", "M": "Monthly"}
 
 
 # ------------------------------------------------------------------ plan ----
@@ -339,6 +354,32 @@ def pair_verdicts(csv_dir: str, sym: str, daily: pd.DataFrame, as_of: str):
     return pairs, missing
 
 
+def _ratio_for(csv_dir: str, sym: str, daily: pd.DataFrame, as_of: str):
+    """Presentation helper για το ratio pane: ίδια λογική με το pair_verdicts
+    (asset class → PAIR_BENCH, ratio των mirror daily σειρών, resample όπως το
+    tf_series), αλλά επιστρέφει τις ΣΕΙΡΕΣ για σχεδίαση, όχι verdicts. Παίρνει
+    τον πρώτο διαθέσιμο benchmark. Επιστρέφει (name, {tf: series}) ή (None, None).
+    Δεν αγγίζει pair_verdicts/JSON."""
+    cls = next((c for c, syms in ASSET_CLASS.items() if sym in syms), None)
+    for bench in PAIR_BENCH.get(cls, []):
+        if bench == sym:
+            continue
+        p = os.path.join(csv_dir, f"{bench}_1d.csv")
+        if not os.path.exists(p):
+            continue
+        bdf = pd.read_csv(p, parse_dates=["date"]).set_index("date").sort_index()
+        ratio = (daily["close"] / cut_asof(bdf, as_of)["close"]).dropna()
+        if len(ratio) < 30:
+            continue
+        return f"{sym}/{bench}", {
+            "D": ratio,
+            "W": ratio.resample("W-MON", label="left", closed="left")
+                      .last().dropna(),
+            "M": ratio.resample("MS").last().dropna(),
+        }
+    return None, None
+
+
 def load_manual_levels(path: str, sym: str):
     """Χειροκίνητα levels του Π. από το config/levels.csv (levels route).
     Σχήμα: symbol,price,kind,source,date,note — kind: support|resistance.
@@ -419,70 +460,296 @@ def fmt(p: float) -> str:
             else f"{p:.4f}")
 
 
-def plot_tf(sym, tf, df, sup, res, verd, out_png):
+def _compact(v: float) -> str:
+    """Compact volume label: 1.2M / 850K / 1.1B."""
+    v = abs(float(v))
+    for div, suf in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if v >= div:
+            return f"{v / div:.1f}{suf}"
+    return f"{v:.0f}"
+
+
+def _nice_log_ticks(lo: float, hi: float):
+    """1-2-5 «nice» ticks για log W/M άξονα μεταξύ lo/hi (max ~5)."""
+    if lo <= 0:
+        lo = hi / 100.0
+    ticks = []
+    e = math.floor(math.log10(lo))
+    while True:
+        for m in (1, 2, 5):
+            v = m * (10 ** e)
+            if v > hi * 1.001:
+                break
+            if v >= lo * 0.999:
+                ticks.append(v)
+        if 10 ** e > hi:
+            break
+        e += 1
+    ticks = sorted(set(ticks))
+    if len(ticks) > 5:                     # κράτα ~5 ομοιόμορφα
+        keep = np.linspace(0, len(ticks) - 1, 5).round().astype(int)
+        ticks = [ticks[i] for i in sorted(set(keep))]
+    return ticks
+
+
+def _verdict_badge(ax, verd: str):
+    """Verdict badge πάνω-δεξιά: χρώμα ανά κατεύθυνση, «λίγο ιστορικό ⚠️» αν
+    ισχύει. Presentation-only — δεν αγγίζει τη λογική του verdict()."""
+    thin = ("λίγο ιστορικό" in verd) or ("⚠️" in verd)
+    core = verd.split(" ⚠️")[0].strip()          # π.χ. "BEARISH (0/6)"
+    low = core.lower()
+    if "bull" in low:
+        key = "bull"
+    elif "bear" in low:
+        key = "bear"
+    else:
+        key = "neutral"
+    bg, fg = BADGE[key]
+    txt = core.replace("(", "").replace(")", "").upper()   # "BEARISH 0/6"
+    ax.text(0.985, 0.955, txt, transform=ax.transAxes, ha="right", va="top",
+            fontsize=11, fontweight="bold", color=fg, zorder=12,
+            bbox=dict(boxstyle="round,pad=0.4", fc=bg, ec="none"))
+    if thin:
+        ax.text(0.985, 0.885, "λίγο ιστορικό ⚠️", transform=ax.transAxes,
+                ha="right", va="top", fontsize=9.5, color=C_MUT, zorder=12)
+
+
+def _thin_labels(entries, y_range: float):
+    """Collision guard για level labels: όσα απέχουν <2.5% του y-range κρατούν
+    ένα label — του κοντινότερου στην τιμή· τα manual (Π.) κερδίζουν πάντα.
+    entries: dicts με price, is_manual, dist (|price-last|). Επιστρέφει τα kept."""
+    min_gap = 0.025 * y_range
+    kept = []
+    for e in sorted(entries, key=lambda z: z["price"]):
+        clash = next((k for k in kept
+                      if abs(k["price"] - e["price"]) < min_gap), None)
+        if clash is None:
+            kept.append(e)
+            continue
+        if e["is_manual"] and not clash["is_manual"]:
+            kept[kept.index(clash)] = e            # manual κερδίζει
+        elif e["is_manual"] == clash["is_manual"] and e["dist"] < clash["dist"]:
+            kept[kept.index(clash)] = e            # κοντινότερο στην τιμή
+    return kept
+
+
+def plot_tf(sym, tf, df, sup, res, verd, out_png,
+            manual=None, ratio=None, stamp=""):
+    """Redesign 2026-08-06 — mobile-first 1080×1350 PNG. Presentation-only:
+    δέχεται πλήρη sup/res (κόβει sup[:2]/res[:2] ΕΔΩ), manual levels Π. και
+    προαιρετικό ratio pane. sr_levels/verdict μένουν άθικτα."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from matplotlib.ticker import (FixedLocator, FuncFormatter, MaxNLocator,
+                                   NullLocator)
+    from matplotlib.transforms import blended_transform_factory
 
     cfg = TF_CFG[tf]
     d = df.iloc[-cfg["show"]:]
     x = np.arange(len(d))
-    fig, ax = plt.subplots(figsize=(13, 6.5), dpi=110)
-    fig.patch.set_facecolor("white")
-    ax.set_facecolor("white")
+    n = len(d)
+    last = float(d["close"].iloc[-1])
+    manual = manual or []
+    has_ratio = (ratio is not None and ratio[1] is not None
+                 and tf in ("D", "W", "M"))
 
-    # candles (thin marks, no borders)
-    w = 0.65
+    fig = plt.figure(figsize=FIGSIZE, dpi=DPI)
+    fig.patch.set_facecolor("white")
+    if has_ratio:
+        gs = fig.add_gridspec(3, 1, height_ratios=[4, 1, 1], hspace=0.05,
+                              left=0.10, right=0.855, top=0.865, bottom=0.055)
+        ax = fig.add_subplot(gs[0])
+        ax_r = fig.add_subplot(gs[1], sharex=ax)
+        ax_v = fig.add_subplot(gs[2], sharex=ax)
+    else:
+        gs = fig.add_gridspec(2, 1, height_ratios=[4, 1], hspace=0.05,
+                              left=0.10, right=0.855, top=0.865, bottom=0.055)
+        ax = fig.add_subplot(gs[0])
+        ax_r = None
+        ax_v = fig.add_subplot(gs[1], sharex=ax)
+    for a in (ax, ax_r, ax_v):
+        if a is not None:
+            a.set_facecolor("white")
+
+    # ---- candles (thin marks, no borders) ----
+    w = 0.62
     up = d["close"].values >= d["open"].values
-    ax.vlines(x, d["low"], d["high"],
-              color=np.where(up, C_UP, C_DN), lw=0.7, zorder=2)
+    cc = np.where(up, C_UP, C_DN)
+    ax.vlines(x, d["low"], d["high"], color=cc, lw=0.8, zorder=2)
     ax.bar(x, (d["close"] - d["open"]).abs(),
            bottom=np.minimum(d["open"], d["close"]), width=w,
-           color=np.where(up, C_UP, C_DN), zorder=3)
+           color=cc, zorder=3)
 
-    for n in EMAS:
-        col = f"ema{n}"
+    lo_vis, hi_vis = float(d["low"].min()), float(d["high"].max())
+    y_range = hi_vis - lo_vis
+    vis_lo, vis_hi = lo_vis * 0.9, hi_vis * 1.1
+    trans = blended_transform_factory(ax.transAxes, ax.transData)
+
+    # ---- EMAs (lines· τα end-labels μπαίνουν στο unified right-gutter) ----
+    ema_ends = []
+    for em in EMAS:
+        col = f"ema{em}"
         if col in d and d[col].notna().any():
-            ax.plot(x, d[col], color=C_EMA[n], lw=1.4, label=f"EMA {n}",
-                    zorder=4)
+            ax.plot(x, d[col], color=C_EMA[em], lw=EMA_LW[em], zorder=4,
+                    solid_capstyle="round")
+            yv = float(d[col].iloc[-1])
+            if np.isfinite(yv) and vis_lo <= yv <= vis_hi:
+                ema_ends.append((em, yv))
 
-    lo_vis, hi_vis = d["low"].min(), d["high"].max()
-    for price, touches, _s in sup + res:
-        if not (lo_vis * 0.9 <= price <= hi_vis * 1.1):
+    # ---- algo levels (reference: faint solid hairline, max 2/side) ----
+    label_entries = []
+    for price, _touches, _s in list(sup[:2]) + list(res[:2]):
+        if not (lo_vis * 0.97 <= price <= hi_vis * 1.03):
             continue
-        c = C_SUP if price < d["close"].iloc[-1] else C_RES
-        ax.axhline(price, color=c, lw=1.0, ls=(0, (5, 4)), alpha=0.85, zorder=1)
-        ax.annotate(f" {fmt(price)} ({touches}x)", xy=(1.001, price),
-                    xycoords=("axes fraction", "data"), fontsize=8,
-                    color=c, va="center")
+        c = C_SUP if price < last else C_RES
+        ax.axhline(price, color=c, lw=1.0, alpha=0.30, zorder=1)
+        label_entries.append({"price": float(price), "color": c,
+                              "text": fmt(price), "is_manual": False,
+                              "dist": abs(float(price) - last)})
 
-    step = max(len(d) // 8, 1)
-    ax.set_xticks(x[::step])
-    fmt_d = "%b %d %H:%M" if tf == "4H" else ("%Y-%m" if tf in ("W", "M")
-                                              else "%b %d %y")
-    ax.set_xticklabels([t.strftime(fmt_d) for t in d.index[::step]],
-                       fontsize=8, color=C_MUT)
+    # ---- manual levels Π. (dashed ink, prominent) ----
+    for m in manual:
+        price = m.get("price")
+        if price is None or not (lo_vis * 0.97 <= price <= hi_vis * 1.03):
+            continue
+        ax.axhline(price, color=C_MAN, lw=1.6, ls=(0, (6, 3)), alpha=0.55,
+                   zorder=5)
+        label_entries.append({"price": float(price), "color": C_INK,
+                              "text": f"{fmt(price)} · Π.", "is_manual": True,
+                              "dist": abs(float(price) - last)})
+
+    # ---- dotted recent guide στην τελευταία τιμή (μέσα στο plot, true y) ----
+    ax.plot(x[-min(10, n):], [last] * min(10, n), color=C_INK, lw=0.8,
+            ls=(0, (1, 2)), alpha=0.7, zorder=5)
+
+    # ---- price y-axis (max ~5 ticks, hairline horizontal grid) ----
     if cfg["log"]:
         ax.set_yscale("log")
-        from matplotlib.ticker import FixedLocator, FuncFormatter, NullLocator
-        lo, hi = np.log10(lo_vis * 0.95), np.log10(hi_vis * 1.05)
-        ticks = np.geomspace(10 ** lo, 10 ** hi, 9)
-        nice = [float(f"{t:.2g}") for t in ticks]
-        ax.yaxis.set_major_locator(FixedLocator(sorted(set(nice))))
+        ax.set_ylim(lo_vis * 0.92, hi_vis * 1.08)   # multiplicative pad (log!)
+        ticks = _nice_log_ticks(lo_vis * 0.95, hi_vis * 1.05)
+        ax.yaxis.set_major_locator(FixedLocator(ticks))
         ax.yaxis.set_minor_locator(NullLocator())
         ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: fmt(v)))
-    ax.tick_params(colors=C_MUT, labelsize=8)
-    ax.grid(axis="y", color=C_GRID, lw=0.6, zorder=0)
-    for s in ("top", "right", "left"):
-        ax.spines[s].set_visible(False)
-    ax.spines["bottom"].set_color(C_GRID)
+    else:
+        ax.set_ylim(lo_vis - 0.04 * y_range, hi_vis + 0.06 * y_range)
+        ax.yaxis.set_major_locator(MaxNLocator(5, prune="both"))
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: fmt(v)))
+    ax.grid(axis="y", color=C_GRID, lw=0.7, zorder=0)
+    ax.tick_params(colors=C_MUT, labelsize=11, length=0)
 
-    last = d["close"].iloc[-1]
-    ax.set_title(f"{sym} · {tf} · {fmt(last)} $ · {verd}",
-                 loc="left", fontsize=11, color=C_INK, fontweight="bold")
-    ax.legend(loc="upper left", frameon=False, fontsize=8, labelcolor=C_INK)
-    fig.tight_layout()
-    fig.savefig(out_png, bbox_inches="tight")
+    # ---- unified right-gutter labels: EMA ends + kept levels + last price,
+    #      decluttered vertically σε display space (ίδιο για log & linear) ----
+    edge = []
+    for e in _thin_labels(label_entries, y_range if y_range > 0 else 1.0):
+        edge.append({"y": e["price"], "text": e["text"], "dash": e["color"],
+                     "tc": C_INK if e["is_manual"] else C_MUT,
+                     "sz": 11 if e["is_manual"] else 10.5,
+                     "fw": "semibold" if e["is_manual"] else "normal",
+                     "a": 1.0 if e["is_manual"] else 0.7, "box": False})
+    for em, yv in ema_ends:
+        edge.append({"y": yv, "text": str(em), "dash": C_EMA[em],
+                     "tc": C_EMA[em], "sz": 10, "fw": "bold", "a": 1.0,
+                     "box": False})
+    edge.append({"y": last, "text": fmt(last), "dash": None, "tc": "white",
+                 "sz": 10.5, "fw": "bold", "a": 1.0, "box": True})
+
+    tD = ax.transData
+    inv = tD.inverted()
+    for it in edge:
+        it["disp"] = float(tD.transform((0, it["y"]))[1])
+    edge.sort(key=lambda z: z["disp"])
+    gap = 22.0
+    for i in range(1, len(edge)):
+        if edge[i]["disp"] - edge[i - 1]["disp"] < gap:
+            edge[i]["disp"] = edge[i - 1]["disp"] + gap
+    for it in edge:
+        ty = float(inv.transform((0, it["disp"]))[1])
+        if it["dash"] is not None:
+            ax.plot([1.006, 1.028], [ty, ty], color=it["dash"], lw=2.4,
+                    transform=trans, clip_on=False, zorder=7, alpha=it["a"])
+        if it["box"]:
+            ax.text(1.006, ty, it["text"], transform=trans, ha="left",
+                    va="center", fontsize=it["sz"], color="white",
+                    fontweight="bold", zorder=9, clip_on=False,
+                    bbox=dict(boxstyle="round,pad=0.28", fc=C_INK, ec="none"))
+        else:
+            ax.text(1.038, ty, it["text"], transform=trans, ha="left",
+                    va="center", fontsize=it["sz"], color=it["tc"],
+                    fontweight=it["fw"], zorder=8, clip_on=False)
+
+    _verdict_badge(ax, verd)
+
+    # ---- ratio pane ----
+    if has_ratio:
+        rname, rser = ratio
+        r = rser.reindex(d.index, method="nearest",
+                         tolerance=pd.Timedelta(
+                             days=1 if tf == "D" else 5 if tf == "W" else 20))
+        rv = r.values.astype(float)
+        ax_r.plot(x, rv, color=C_RATIO, lw=1.6, zorder=3)
+        ax_r.text(0.012, 0.86, rname, transform=ax_r.transAxes, ha="left",
+                  va="top", fontsize=10, color=C_SEC, fontweight="bold")
+        finite = rv[np.isfinite(rv)]
+        if finite.size:
+            rlast = finite[-1]
+            ax_r.annotate(fmt(rlast) if rlast >= 1 else f"{rlast:.4f}",
+                          xy=(1.006, rlast),
+                          xycoords=("axes fraction", "data"), va="center",
+                          ha="left", fontsize=10, color=C_RATIO,
+                          clip_on=False)
+            ax_r.set_ylim(np.nanmin(finite) * 0.97, np.nanmax(finite) * 1.03)
+        ax_r.yaxis.set_major_locator(MaxNLocator(2, prune="both"))
+        ax_r.grid(axis="y", color=C_GRID, lw=0.7, zorder=0)
+        ax_r.tick_params(colors=C_MUT, labelsize=11, length=0)
+
+    # ---- volume pane ----
+    ax_v.bar(x, d["volume"].values, width=w, color=C_VOL, zorder=2)
+    ax_v.text(0.012, 0.86, "Vol", transform=ax_v.transAxes, ha="left",
+              va="top", fontsize=10, color=C_SEC, fontweight="bold")
+    ax_v.set_ylim(0, float(d["volume"].max()) * 1.15 if d["volume"].max() else 1)
+    ax_v.yaxis.set_major_locator(MaxNLocator(2))
+    ax_v.yaxis.set_major_formatter(FuncFormatter(lambda v, _: _compact(v)))
+    ax_v.grid(axis="y", color=C_GRID, lw=0.7, zorder=0)
+    ax_v.tick_params(colors=C_MUT, labelsize=11, length=0)
+
+    # ---- shared x-axis (4 ticks, only bottom pane labelled) ----
+    bottom = ax_v
+    fmt_d = "%b %d %H:%M" if tf == "4H" else ("%b %Y" if tf in ("W", "M")
+                                              else "%b %d")
+    xt = np.linspace(0, n - 1, 4).round().astype(int)
+    xt = sorted(set(xt))
+    for a in (ax, ax_r, ax_v):
+        if a is None:
+            continue
+        a.set_xlim(-1, n)
+        a.set_xticks(xt)
+        for s in ("top", "right", "left"):
+            a.spines[s].set_visible(False)
+        a.spines["bottom"].set_color(C_GRID)
+        if a is bottom:
+            a.set_xticklabels([d.index[i].strftime(fmt_d) for i in xt],
+                              fontsize=11, color=C_MUT)
+        else:
+            a.tick_params(labelbottom=False)
+
+    # ---- header: title / subtitle / one-row legend ----
+    fig.text(0.10, 0.965, f"{sym} · {TF_NAME.get(tf, tf)}", ha="left",
+             va="top", fontsize=20, fontweight="bold", color=C_INK)
+    subtitle = f"${fmt(last)} · {stamp}" if stamp else f"${fmt(last)}"
+    fig.text(0.10, 0.925, subtitle, ha="left", va="top", fontsize=11,
+             color=C_SEC)
+    handles = [Line2D([0], [0], color=C_EMA[em], lw=EMA_LW[em],
+                      label=f"EMA {em}")
+               for em in EMAS if f"ema{em}" in d and d[f"ema{em}"].notna().any()]
+    if handles:
+        fig.legend(handles=handles, ncol=3, frameon=False,
+                   loc="upper left", bbox_to_anchor=(0.095, 0.905),
+                   fontsize=10.5, labelcolor=C_INK, columnspacing=1.6,
+                   handlelength=1.6)
+
+    fig.savefig(out_png)
     plt.close(fig)
 
 
@@ -507,6 +774,15 @@ def cmd_analyze(sym: str, csv_dir: str, out_dir: str, as_of: str = None,
              f"_Δεδομένα: daily {daily.index[0].date()} → {daily.index[-1].date()}"
              f" ({len(daily)} candles· το τελευταίο = μερικό/σημερινό)_",
              ""]
+    # redesign: manual levels + ratio series φορτώνονται ΠΡΙΝ το TF loop ώστε
+    # να περαστούν στο plot_tf (report/JSON χρησιμοποιούν τα ίδια αντικείμενα
+    # παρακάτω — καμία αλλαγή στο output).
+    manual, manual_skipped = load_manual_levels(levels_path, sym)
+    ratio_name, ratio_series = (None, None)
+    if not no_charts:
+        ratio_name, ratio_series = _ratio_for(csv_dir, sym, daily, as_of)
+    stamp = f"as-of {as_of}" if as_of else f"as-of {daily.index[-1].date()}"
+
     verdicts, jtf = {}, {}
     for tf in [t for t in ("M", "W", "D", "4H") if t in frames]:
         df = add_emas(frames[tf].copy())
@@ -530,7 +806,10 @@ def cmd_analyze(sym: str, csv_dir: str, out_dir: str, as_of: str = None,
                    "candles": len(df)}
         if not no_charts:
             png = os.path.join(out_dir, f"{sym}_{tf}.png")
-            plot_tf(sym, tf, df, d_sup, d_res, verd, png)
+            rt = ((ratio_name, ratio_series[tf])
+                  if ratio_series and tf in ratio_series else None)
+            plot_tf(sym, tf, df, sup, res, verd, png,
+                    manual=manual, ratio=rt, stamp=stamp)
 
         lines += [f"## {tf} — {verd}", ""]
         lines += [f"- {c}" for c in checks]
@@ -560,7 +839,6 @@ def cmd_analyze(sym: str, csv_dir: str, out_dir: str, as_of: str = None,
                       "(ή πολύ λίγα κοινά candles) — προστίθεται με το mirror._"]
         lines += [""]
 
-    manual, manual_skipped = load_manual_levels(levels_path, sym)
     jml = []
     if manual or manual_skipped:
         lines += ["## Levels Π. (χειροκίνητα — config/levels.csv)", ""]
