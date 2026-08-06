@@ -98,6 +98,12 @@ The run writes `status.json`, **commits whatever succeeded**, and only then
 fails and fires a Telegram alert. Stale data is therefore always the last known
 good snapshot, never a truncated one.
 
+Alerts are deduplicated on the set of failing symbols: `status.json` records
+which set the last alert covered (`alerted_failed`), and Telegram is pinged only
+when that set changes — a new symbol breaks, or everything recovers. A vendor
+outage lasting a week is one message, not seven. The run itself still fails
+every day, so the red X in Actions stays honest.
+
 Secrets used: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`. Without them the run
 still works and just logs a warning instead of alerting.
 

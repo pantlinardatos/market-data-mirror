@@ -64,8 +64,12 @@ jobs:
             git push
           fi
 
+      # Deduped: fetch.py sets outputs.alert=true only when the set of failed
+      # symbols differs from the one the last alert covered (it keeps that set
+      # in status.json as "alerted_failed"). A vendor that stays broken for a
+      # week is one message, not seven — see the note in fetch.py.
       - name: Alert on failure
-        if: steps.fetch.outcome == 'failure'
+        if: steps.fetch.outcome == 'failure' && steps.fetch.outputs.alert == 'true'
         env:
           TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}

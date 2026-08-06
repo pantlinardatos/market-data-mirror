@@ -15,6 +15,8 @@ Design rules (see Vault System/system-redesign-2026-07.md, Κίνηση 2):
   * deterministic rounding, so an unchanged day produces a byte-identical file
   * a run that had any failure writes status.json and exits 1 AFTER the good
     data has already been written, so the workflow commits first, alerts second
+  * alerts are deduplicated: status.json remembers which failed set was last
+    alerted on, and the workflow only pings Telegram when that set changes
 """
 
 import argparse
@@ -27,6 +29,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+STATUS_PATH = os.path.join(os.path.dirname(DATA_DIR), "status.json")
 
 COLS = ["date", "open", "high", "low", "close", "volume"]
 
@@ -299,6 +302,51 @@ def fetch_crypto(name: str, candidates: list) -> list:
     return notes
 
 
+# ------------------------------------------------------------ alert dedup ---
+# A vendor break lasts days, and the cron fires every day. Alerting on every
+# failing run means a broken yfinance produces a Telegram message every morning
+# until someone fixes it upstream — which trains the reader to ignore the
+# channel, so the one alert that matters gets ignored too.
+#
+# So: alert on *change of state*, not on state. status.json carries
+# "alerted_failed" — the failed set the last alert covered — and a new alert
+# only goes out when the current failed set differs from it (a new symbol
+# broke, or one recovered). An all-clear run leaves it empty, so the next
+# breakage alerts again.
+#
+# Split of responsibility: this file owns status.json so it decides, and
+# exports the verdict as a step output; the workflow owns the Telegram call so
+# it gates on that output. The flag is written (and committed) before the curl
+# actually runs, so a run cancelled in between is recorded as alerted — the
+# only way round that is a second commit after the send, which is not worth it.
+def _previous_alerted() -> set:
+    """Symbols the previous run's alert already covered."""
+    try:
+        with open(STATUS_PATH, encoding="utf-8") as fh:
+            prev = json.load(fh)
+    except (OSError, ValueError):
+        return set()          # first run, or a status.json we cannot trust
+    if "alerted_failed" in prev:
+        return set(prev.get("alerted_failed") or [])
+    # Back-compat with status.json files written before dedup existed: back
+    # then every failing run alerted, so its "failed" keys are exactly what the
+    # last alert covered. Without this the upgrade re-alerts a known breakage.
+    return set(prev.get("failed") or {})
+
+
+def _emit_output(key: str, value: str) -> None:
+    """Set a GitHub Actions step output; a no-op outside Actions."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{key}={value}\n")
+    except OSError as exc:                                      # noqa: BLE001
+        # Never let telemetry plumbing take down a run that fetched fine.
+        print(f"warn: could not write GITHUB_OUTPUT: {exc}", file=sys.stderr)
+
+
 # -------------------------------------------------------------------- main ---
 def main() -> int:
     ap = argparse.ArgumentParser(description="fetch OHLCV into data/*.csv")
@@ -332,17 +380,33 @@ def main() -> int:
         failed[s] = "unknown symbol (not in STOCKS or CRYPTO)"
         print(f"FAIL {s}: unknown symbol", file=sys.stderr, flush=True)
 
+    # Read the previous state before overwriting it.
+    #
+    # Caveat for --symbols runs: a subset run only knows about the subset, so a
+    # manual `--symbols SOL` while TSLA is broken records an empty failed set
+    # and the next nightly full run re-alerts for TSLA. That errs towards one
+    # extra alert rather than towards silence, which is the right direction.
+    previously_alerted = _previous_alerted()
+    should_alert = set(failed) != previously_alerted
+
     status = {
         "run_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "ok": sorted(ok),
         "failed": failed,
+        # Always equals the current failed set, because any difference from the
+        # previous value is exactly what triggers the alert above.
+        "alerted_failed": sorted(failed),
     }
-    with open(os.path.join(os.path.dirname(DATA_DIR), "status.json"), "w",
-              encoding="utf-8") as fh:
+    with open(STATUS_PATH, "w", encoding="utf-8") as fh:
         json.dump(status, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
 
+    _emit_output("alert", "true" if should_alert else "false")
+
     print(f"\n{len(ok)} ok, {len(failed)} failed")
+    if failed:
+        print("alert: sending (failed set changed)" if should_alert else
+              "alert: suppressed (same failed set as the last alert)")
     return 1 if failed else 0
 
 
